@@ -1,0 +1,112 @@
+[
+  {
+    "test": "Normal Input 1",
+    "expected_status": 200,
+    "input": {
+      "battery_v": 3.8,
+      "temp_c": 25,
+      "rings_per_day": 8,
+      "wifi_rssi_dbm": -60,
+      "age_months": 12
+    }
+  },
+  {
+    "test": "Normal Input 2",
+    "expected_status": 200,
+    "input": {
+      "battery_v": 4.1,
+      "temp_c": 30,
+      "rings_per_day": 5,
+      "wifi_rssi_dbm": -55,
+      "age_months": 6
+    }
+  },
+  {
+    "test": "Normal Input 3",
+    "expected_status": 200,
+    "input": {
+      "battery_v": 3.5,
+      "temp_c": 20,
+      "rings_per_day": 12,
+      "wifi_rssi_dbm": -75,
+      "age_months": 24
+    }
+  },
+  {
+    "test": "Maximum Observed Dataset Values",
+    "expected_status": 200,
+    "input": {
+      "battery_v": 4.9,
+      "temp_c": 45,
+      "rings_per_day": 30,
+      "wifi_rssi_dbm": -35,
+      "age_months": 60
+    }
+  },
+  {
+    "test": "Minimum Observed Dataset Values",
+    "expected_status": 200,
+    "input": {
+      "battery_v": 2.5,
+      "temp_c": 10,
+      "rings_per_day": 0,
+      "wifi_rssi_dbm": -95,
+      "age_months": 1
+    }
+  },
+  {
+    "test": "Invalid Battery Voltage",
+    "expected_status": 422,
+    "input": {
+      "battery_v": 6,
+      "temp_c": 25,
+      "rings_per_day": 8,
+      "wifi_rssi_dbm": -60,
+      "age_months": 12
+    }
+  },
+  {
+    "test": "Invalid Temperature",
+    "expected_status": 422,
+    "input": {
+      "battery_v": 3.8,
+      "temp_c": -129,
+      "rings_per_day": 8,
+      "wifi_rssi_dbm": -60,
+      "age_months": 12
+    }
+  },
+  {
+    "test": "Invalid Rings Per Day",
+    "expected_status": 422,
+    "input": {
+      "battery_v": 3.8,
+      "temp_c": 25,
+      "rings_per_day": 501,
+      "wifi_rssi_dbm": -60,
+      "age_months": 12
+    }
+  },
+  {
+    "test": "Invalid Wi-Fi Signal",
+    "expected_status": 422,
+    "input": {
+      "battery_v": 3.8,
+      "temp_c": 25,
+      "rings_per_day": 8,
+      "wifi_rssi_dbm": -101,
+      "age_months": 12
+    }
+  },
+  {
+    "test": "Invalid Device Age",
+    "expected_status": 422,
+    "input": {
+      "battery_v": 3.8,
+      "temp_c": 25,
+      "rings_per_day": 8,
+      "wifi_rssi_dbm": -60,
+      "age_months": 121
+    }
+  }
+]
