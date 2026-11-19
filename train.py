@@ -27,7 +27,7 @@ df = pd.read_csv(f"data/team_{a.team:02d}_train.csv")
 # TODO Mission 1: find the sensor glitches (plot every column first!) and write a rule that
 # marks them. Say in your report how many you found and why each rule is safe.
 # Mission 1: Glitch detection
-# -127°C is treated as an invalid temperature sensor reading.
+# -127°C is treated as an invalid temperature sensor reading. so it is dropped
 bad = df["temp_c"] == -127
 
 print(f"{len(df)} rows, {bad.sum()} glitch rows dropped")
@@ -40,7 +40,13 @@ val, tr = df.iloc[idx[:n_val]], df.iloc[idx[n_val:]]
 X, y = tr[FEATURES].to_numpy(np.float32), tr.days_left.to_numpy(np.float32)
 Xv, yv = val[FEATURES].to_numpy(np.float32), val.days_left.to_numpy(np.float32)
 # TODO Mission 2: normalisation. Why must mu and sd come from the TRAINING rows only?
-mu, sd = np.zeros(X.shape[1], np.float32), np.ones(X.shape[1], np.float32)
+# Mission 2: Normalize using training data only 
+# here it is normalised because every feature had every different scale
+mu = X.mean(axis=0)
+sd = X.std(axis=0)
+
+# Prevent division by zero
+sd[sd == 0] = 1.0
 
 mae = lambda p, t: float(np.mean(np.abs(p - t)))
 print(f"baseline (predict the mean): {mae(np.full_like(yv, y.mean()), yv):.2f} days")
@@ -108,6 +114,17 @@ for ep in range(a.epochs):
 with torch.no_grad():
     val_mae = mae(net(Xvt).numpy(), yv)
 print(f"network {hidden}:            {val_mae:.2f} days")
+
+# Calculate training v/s validation MAE to evaluate model performance and detect overfitting.
+with torch.no_grad():
+    train_predictions = net(Xt).numpy()
+    val_predictions = net(Xvt).numpy()
+
+    train_mae = mae(train_predictions, y)
+    val_mae = mae(val_predictions, yv)
+
+print(f"training MAE:   {train_mae:.2f} days")
+print(f"validation MAE: {val_mae:.2f} days")
 
 os.makedirs("model", exist_ok=True)
 torch.save(net.state_dict(), "model/model.pt")
