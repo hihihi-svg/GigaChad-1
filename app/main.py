@@ -51,6 +51,7 @@ app = FastAPI(title="Doorbell battery API")
 ms = lambda t0: round((time.perf_counter() - t0) * 1000, 3)
 
 
+
 @app.get("/model_info")
 def model_info():
      # TODO Mission 2 + 4: return your per-layer table, worked out FROM THE NETWORK (net.net),
@@ -60,31 +61,46 @@ def model_info():
     #  "fits_300kb_sram_f32": true/false, "fits_300kb_sram_int8": true/false}
     # Count only the Linear layers (ReLU has no parameters). Clue: a Linear layer m has
     # m.in_features and m.out_features.
-    # Calculate parameters, memory usage and MACs directly from Linear layers.
+
+    # this part actually inspects NN and gives the size, computational cost vagera vagera
     layers = []
+    linear_layers = []
 
     for module in net.net.modules():
         if isinstance(module, torch.nn.Linear):
-            in_features = module.in_features
-            out_features = module.out_features
+            linear_layers.append(module)
 
-            params = module.weight.numel()
-            if module.bias is not None:
-                params += module.bias.numel()
+    for i, module in enumerate(linear_layers):
+        in_features = module.in_features
+        out_features = module.out_features
 
-            layers.append({
-                "name": f"linear{len(layers) + 1}",
-                "in": in_features,
-                "out": out_features,
-                "params": params,
-                "bytes_f32": params * 4,
-                "macs": in_features * out_features
-            })
+        params = module.weight.numel()
+        if module.bias is not None:
+            params += module.bias.numel()
+
+        layers.append({
+            "name": f"linear{i + 1}",
+            "in": in_features,
+            "out": out_features,
+            "params": params,
+            "bytes_f32": params * 4,
+            "macs": in_features * out_features
+        })
 
     total_params = sum(layer["params"] for layer in layers)
     total_bytes_f32 = total_params * 4
+
+    # Assumption: all weights and biases are represented using INT8.
     total_bytes_int8 = total_params
+
     total_macs = sum(layer["macs"] for layer in layers)
+
+    # Largest hidden-layer activation for a single input.
+    hidden_widths = [layer.out_features for layer in linear_layers[:-1]]
+    max_activation_elements = max(hidden_widths, default=0)
+
+    activation_bytes_f32 = max_activation_elements * 4
+    activation_bytes_int8 = max_activation_elements
 
     sram_limit = 300 * 1024
 
@@ -94,9 +110,17 @@ def model_info():
         "total_bytes_f32": total_bytes_f32,
         "total_bytes_int8": total_bytes_int8,
         "total_macs": total_macs,
-        "fits_300kb_sram_f32": total_bytes_f32 <= sram_limit,
-        "fits_300kb_sram_int8": total_bytes_int8 <= sram_limit
+        "activation_elements": max_activation_elements,
+        "activation_bytes_f32": activation_bytes_f32,
+        "activation_bytes_int8": activation_bytes_int8,
+        "fits_300kb_sram_f32": (
+            total_bytes_f32 + activation_bytes_f32 <= sram_limit
+        ),
+        "fits_300kb_sram_int8": (
+            total_bytes_int8 + activation_bytes_int8 <= sram_limit
+        )
     }
+
 
 
 @app.get("/health")
