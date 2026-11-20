@@ -52,29 +52,41 @@ ms = lambda t0: round((time.perf_counter() - t0) * 1000, 3)
 
 
 
+
 @app.get("/model_info")
 def model_info():
-     # TODO Mission 2 + 4: return your per-layer table, worked out FROM THE NETWORK (net.net),
-    # not typed in by hand, so it stays right if you change the layer sizes. Exactly these keys:
-    # {"layers": [{"name": "linear1", "in": 5, "out": 32, "params": ..., "bytes_f32": ..., "macs": ...}, ...],
-    #  "total_params": ..., "total_bytes_f32": ..., "total_bytes_int8": ..., "total_macs": ...,
-    #  "fits_300kb_sram_f32": true/false, "fits_300kb_sram_int8": true/false}
-    # Count only the Linear layers (ReLU has no parameters). Clue: a Linear layer m has
-    # m.in_features and m.out_features.
+    # TODO Mission 2 + 4: return your per-layer table, worked out FROM THE NETWORK (net.net),
+    # not typed in by hand, so it stays right if you change the layer sizes.
+    #
+    # Required original keys:
+    # {"layers": [{"name": "linear1", "in": 5, "out": 32,
+    #              "params": ..., "bytes_f32": ..., "macs": ...}, ...],
+    #  "total_params": ..., "total_bytes_f32": ...,
+    #  "total_bytes_int8": ..., "total_macs": ...,
+    #  "fits_300kb_sram_f32": true/false,
+    #  "fits_300kb_sram_int8": true/false}
+    #
+    # Count only the Linear layers (ReLU has no parameters).
+    # Clue: a Linear layer m has m.in_features and m.out_features.
 
-    # this part actually inspects NN and gives the size, computational cost vagera vagera
+    # This part actually inspects the NN and gives the size,
+    # computational cost, etc.
+
     layers = []
     linear_layers = []
 
+    # Find all Linear layers dynamically from the trained network.
     for module in net.net.modules():
         if isinstance(module, torch.nn.Linear):
             linear_layers.append(module)
 
+    # Calculate parameter count, storage and MACs for each layer.
     for i, module in enumerate(linear_layers):
         in_features = module.in_features
         out_features = module.out_features
 
         params = module.weight.numel()
+
         if module.bias is not None:
             params += module.bias.numel()
 
@@ -87,41 +99,137 @@ def model_info():
             "macs": in_features * out_features
         })
 
+    # Total number of trainable parameters across all Linear layers.
     total_params = sum(layer["params"] for layer in layers)
+
+    # Float32 uses 4 bytes per parameter.
     total_bytes_f32 = total_params * 4
 
     # Assumption: all weights and biases are represented using INT8.
+    # This is an idealized storage estimate, not actual quantized inference.
     total_bytes_int8 = total_params
 
+    # Total Multiply-Accumulate operations for one inference.
     total_macs = sum(layer["macs"] for layer in layers)
 
+    # ---------------------------------------------------------
+    # Mission 4: Activation memory calculations
+    # ---------------------------------------------------------
+
     # Largest hidden-layer activation for a single input.
-    hidden_widths = [layer.out_features for layer in linear_layers[:-1]]
+    # The final Linear layer is excluded because it is the output layer.
+    hidden_widths = [
+        layer.out_features for layer in linear_layers[:-1]
+    ]
+
     max_activation_elements = max(hidden_widths, default=0)
 
+    # Memory occupied by the largest individual hidden activation.
     activation_bytes_f32 = max_activation_elements * 4
     activation_bytes_int8 = max_activation_elements
 
+    # Calculate total working activation buffers.
+    # Our Arduino implementation stores:
+    # - Normalized input array
+    # - First hidden-layer array (h1)
+    # - Second hidden-layer array (h2)
+    # - Final output value
+    #
+    # This is a conservative buffer estimate for the current implementation.
+    input_elements = linear_layers[0].in_features if linear_layers else 0
+    output_elements = linear_layers[-1].out_features if linear_layers else 0
+
+    peak_activation_elements = (
+        input_elements
+        + sum(hidden_widths)
+        + output_elements
+    )
+
+    peak_activation_bytes_f32 = peak_activation_elements * 4
+    peak_activation_bytes_int8 = peak_activation_elements
+
+    # ---------------------------------------------------------
+    # Mission 4: ESP32-S3 memory budgets
+    # ---------------------------------------------------------
+
+    # Assignment hardware budgets:
+    # SRAM budget = 300 KB
+    # PSRAM capacity = 8 MB
     sram_limit = 300 * 1024
+    psram_limit = 8 * 1024 * 1024
+
+    # Check whether model weights alone fit into SRAM.
+    fits_sram_weights_f32 = total_bytes_f32 <= sram_limit
+    fits_sram_weights_int8 = total_bytes_int8 <= sram_limit
+
+    # Check whether weights plus activation buffers fit into SRAM.
+    # Runtime overhead, stack, heap and other allocations are excluded.
+    fits_sram_f32 = (
+        total_bytes_f32 + peak_activation_bytes_f32 <= sram_limit
+    )
+
+    fits_sram_int8 = (
+        total_bytes_int8 + peak_activation_bytes_int8 <= sram_limit
+    )
+
+    # Check whether model weights fit into PSRAM.
+    fits_psram_f32 = total_bytes_f32 <= psram_limit
+    fits_psram_int8 = total_bytes_int8 <= psram_limit
+
+    # Check whether weights plus activation buffers fit into PSRAM.
+    fits_psram_f32_with_activations = (
+        total_bytes_f32 + peak_activation_bytes_f32 <= psram_limit
+    )
+
+    fits_psram_int8_with_activations = (
+        total_bytes_int8 + peak_activation_bytes_int8 <= psram_limit
+    )
 
     return {
+        # Original Mission 2 layer-by-layer information.
         "layers": layers,
         "total_params": total_params,
         "total_bytes_f32": total_bytes_f32,
         "total_bytes_int8": total_bytes_int8,
         "total_macs": total_macs,
+
+        # Mission 4: largest individual activation.
         "activation_elements": max_activation_elements,
         "activation_bytes_f32": activation_bytes_f32,
         "activation_bytes_int8": activation_bytes_int8,
-        "fits_300kb_sram_f32": (
-            total_bytes_f32 + activation_bytes_f32 <= sram_limit
-        ),
-        "fits_300kb_sram_int8": (
-            total_bytes_int8 + activation_bytes_int8 <= sram_limit
-        )
+
+        # Mission 4: total working activation buffers.
+        "peak_activation_elements": peak_activation_elements,
+        "peak_activation_bytes_f32": peak_activation_bytes_f32,
+        "peak_activation_bytes_int8": peak_activation_bytes_int8,
+
+        # Original required SRAM feasibility keys.
+        "fits_300kb_sram_f32": fits_sram_f32,
+        "fits_300kb_sram_int8": fits_sram_int8,
+
+        # Additional weight-only SRAM feasibility.
+        "fits_300kb_sram_weights_only_f32": fits_sram_weights_f32,
+        "fits_300kb_sram_weights_only_int8": fits_sram_weights_int8,
+
+        # Mission 4: PSRAM feasibility.
+        "fits_8mb_psram_f32": fits_psram_f32,
+        "fits_8mb_psram_int8": fits_psram_int8,
+        "fits_8mb_psram_f32_with_activations": fits_psram_f32_with_activations,
+        "fits_8mb_psram_int8_with_activations": fits_psram_int8_with_activations,
+
+        # Document the assumptions behind the calculations.
+        "memory_assumptions": {
+            "sram_budget_bytes": sram_limit,
+            "psram_budget_bytes": psram_limit,
+            "float32_bytes_per_parameter": 4,
+            "int8_bytes_per_parameter": 1,
+            "int8_bias_assumption": "Biases also counted as 1 byte",
+            "fit_scope": (
+                "Weights plus input, hidden and output working buffers; "
+                "excludes runtime overhead"
+            )
+        }
     }
-
-
 
 @app.get("/health")
 def health():
